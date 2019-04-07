@@ -1,0 +1,15 @@
+[package]
+name = "bvChat"
+version = "0.1.0"
+authors = ["Justin Rubek <rubejus@bvu.edu>"]
+edition = "2018"
+
+[dependencies]
+
+[[bin]]
+name = "server"
+path = "src/server.rs"
+
+[[bin]]
+name = "client"
+path = "src/client.rs"
