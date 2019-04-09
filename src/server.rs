@@ -56,9 +56,11 @@ enum Message {
 }
 
 fn check_login(username: &str, password: &str) -> bool {
+    // FIXME: Parse saved logins file to verify this. Create account if nonexistent
     true
 }
 
+/// Check if a user is the admin of the server
 fn is_admin(username: &str, user_list: &UserList) -> bool {
     match get_admin(user_list) {
         Some(user) => user == username,
@@ -66,14 +68,15 @@ fn is_admin(username: &str, user_list: &UserList) -> bool {
     }
 }
 
+/// Find the user with the lowest user_id
 fn get_admin(user_list: &UserList) -> Option<String> {
     match user_list.iter().min_by(|a, b| a.1.user_id.cmp(&b.1.user_id)) {
         Some(admin_username) => Some(admin_username.0.to_string()),
         None => None
     }
-    
 }
 
+/// Build a Message to send a DirectMessage to another user
 fn tell(from: &str, contents: &str) -> Message {
     // FIXME: Parse/Pattern match the contents and determine who to send to
     let from = String::from(from);
@@ -152,6 +155,8 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
 
                 // TODO: Check if they've logged in too many times and disallow it
 
+                // TODO: Check and send any saved DMs
+
                 // Add to hashmap
                 broadcast(&format!("{} has connected.", username), &mut user_list);
                 user_list.insert(username, UserData { socket, user_id });
@@ -164,7 +169,10 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                     Occupied(mut d) => {   
                         d.get_mut().socket.write(text.as_bytes());
                     },
-                    Vacant(_) => {}
+                    Vacant(_) => {
+                        // TODO: There isn't a user by this name logged in
+                        // Save the message for later 
+                    }
                 }
 
             }
