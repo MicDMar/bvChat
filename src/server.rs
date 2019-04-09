@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::error::Error;
 use std::fmt;
 use std::io::{BufReader, prelude::*};
@@ -101,6 +102,18 @@ fn handle_connection(mut stream: &TcpStream, tx: mpsc::Sender<Message>) -> Resul
         if message.starts_with("/") {
             // TODO: Command processing
             // use String.split_off (?) to get the rest of the string
+            // Use get_or_else after finding location of space using find to split at specified index.
+            let mut index = message.find(" ");
+            let contents = message.split_off(*index.get_or_insert_with( || message.len()));
+            match message.as_ref() {
+                "/tell" => { 
+                    //Message::DirectMessage { from: username }
+                    //tx.send(Message::DirectMessage(username.clone(),)) see below
+                },
+                _ => {}
+            }
+            
+
         } else {
             // Broadcast message
             tx.send(Message::Chat(username.clone(), message.clone()));
@@ -138,6 +151,12 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
             }
             Message::DirectMessage { from, to, contents } => {
                 let text = format!("{} tells you: {}", from, contents);
+                match user_list.entry(to) {
+                    Occupied(mut d) => {   
+                        d.get_mut().socket.write(text.as_bytes());
+                    },
+                    Vacant(_) => {}
+                }
             }
             Message::Exit(username) => {
                 println!("{} has exited.", username);
