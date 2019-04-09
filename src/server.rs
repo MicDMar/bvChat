@@ -86,25 +86,19 @@ fn handle_connection(
         // TODO: Check if this user is spamming their messages
 
         // Check for commands
-        if message.starts_with("/") {
-            // Command processing
-            // use String.split_off (?) to get the rest of the string
-            let mut index = message.find(" ");
-            // If there isn't a space, get the whole word
-            let contents = message.split_off(*index.get_or_insert_with( || message.len()));
-            match message.as_ref() {
-                "/tell" => { 
-                    //Message::DirectMessage { from: username }
-                    //tx.send(Message::DirectMessage(username.clone(),)) see below
-                },
-                _ => {}
+        let mut index = message.find(" ");
+        // If there isn't a space, get the whole word
+        let contents = message.split_off(*index.get_or_insert_with( || message.len()));
+        match message.as_ref() {
+            "/tell" => { 
+                //Message::DirectMessage { from: username }
+                //tx.send(Message::DirectMessage(username.clone(),)) see below
+            },
+            _ => {
+                // Broadcast message
+                tx.send(Message::Chat(username.clone(), message.clone()));
             }
-        } else {
-            // Broadcast message
-            tx.send(Message::Chat(username.clone(), message.clone()));
         }
-
-        println!("{}", message);
     }
     Ok(())
 }
