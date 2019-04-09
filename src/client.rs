@@ -39,6 +39,7 @@ fn send_messages(mut stream: TcpStream){
   loop {
     io::stdin().read_line(&mut input).expect("Failed to read from stdin.");
     stream.write(input.as_bytes()).expect("Failed to write to the server.");
+    input.clear();
   }
 }
 
