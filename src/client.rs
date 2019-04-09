@@ -27,9 +27,9 @@ fn handle_incoming_messages(mut stream: TcpStream){
   let mut reader = BufReader::new(stream);
   loop {
     let mut message = String::new();
-    let mut buffer: Vec<u8> = Vec::new();
     //Check the username to see if they are blocked and ignore them.
     reader.read_line(&mut message).expect("Unable to read from buffer.");
+    print!("{}", message);
   }
 }
 

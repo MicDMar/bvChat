@@ -58,7 +58,7 @@ fn check_login(username: &str, password: &str) -> bool {
     // TODO: Check if the user has the correct password,
     // creating the account if it does not exist
     
-    false 
+    true
 }
 
 fn handle_connection(mut stream: &TcpStream, tx: mpsc::Sender<Message>) -> Result<(), impl Error> {
@@ -68,6 +68,7 @@ fn handle_connection(mut stream: &TcpStream, tx: mpsc::Sender<Message>) -> Resul
     let mut buffer = BufReader::new(stream);
 
     buffer.read_line(&mut username);
+    username.pop(); //Remove newline character
     buffer.read_line(&mut password);
 
     if check_login(&username, &password) {
@@ -113,34 +114,36 @@ fn handle_connection(mut stream: &TcpStream, tx: mpsc::Sender<Message>) -> Resul
 fn handle_server(rx: mpsc::Receiver<Message>) {
     let mut user_list: HashMap<String, UserData> = HashMap::new();
     let mut user_id = 0;
-
-    match rx.recv().unwrap() {
-        Message::Chat(username, message) => {
-            //println!("{}: {}", username, message);
-            let body = format!("{} says: {}", username, message);
-            // TODO: Send to all sockets in user_list (iteration)
-            for (user, mut data) in user_list {
-                data.socket.write(message.as_bytes()).expect("Body failed to recieve.");
+    loop {
+        match rx.recv().unwrap() {
+            Message::Chat(username, message) => {
+                //println!("{}: {}", username, message);
+                let body = format!("{} says: {}", username, message);
+                // TODO: Send to all sockets in user_list (iteration)
+                for (user, data) in &mut user_list {
+                    println!("see me now");
+                    data.socket.write(body.as_bytes()).expect("Body failed to recieve.");
+                }
             }
-        }
-        Message::Login(username, socket) => {
-            // TODO: Check if they're already logged in and close the connection. \
-            // Try to do this gracefully, as the socket is used by another thread \
-            // that may not know we're closing the connection 
+            Message::Login(username, socket) => {
+                // TODO: Check if they're already logged in and close the connection. \
+                // Try to do this gracefully, as the socket is used by another thread \
+                // that may not know we're closing the connection 
 
-            // TODO: Check if they've logged in too many times and disallow it
-               
-            // Add to hashmap
-            user_list.insert(username, UserData { socket, user_id });
-            user_id += 1;
+                // TODO: Check if they've logged in too many times and disallow it
+                    
+                // Add to hashmap
+                user_list.insert(username, UserData { socket, user_id });
+                user_id += 1;
+            }
+            Message::DirectMessage { from, to, contents } => {
+                let text = format!("{} tells you: {}", from, contents);
+            }
+            Message::Exit(username) => {
+                println!("{} has exited.", username);
+            }
+            _ => { }
         }
-        Message::DirectMessage { from, to, contents } => {
-            let text = format!("{} tells you: {}", from, contents);
-        }
-        Message::Exit(username) => {
-            println!("{} has exited.", username);
-        }
-        _ => { }
     }
 }
 
