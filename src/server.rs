@@ -23,6 +23,8 @@ struct UserData {
     user_id: i32,
 }
 
+type UserList = HashMap<String, UserData>;
+
 impl Ord for UserData {
     fn cmp(&self, other: &UserData) -> Ordering {
         self.user_id.cmp(&other.user_id)
@@ -57,13 +59,30 @@ fn check_login(username: &str, password: &str) -> bool {
     true
 }
 
-fn is_admin(username: &str, user_list: &HashMap<String, UserData>) -> bool {
-    match user_list.iter().min_by(|a, b| a.1.user_id.cmp(&b.1.user_id)) {
-        Some(admin_username) => admin_username.0 == username,
+fn is_admin(username: &str, user_list: &UserList) -> bool {
+    match get_admin(user_list) {
+        Some(user) => user == username,
         None => false
     }
 }
 
+fn get_admin(user_list: &UserList) -> Option<String> {
+    match user_list.iter().min_by(|a, b| a.1.user_id.cmp(&b.1.user_id)) {
+        Some(admin_username) => Some(admin_username.0.to_string()),
+        None => None
+    }
+    
+}
+
+fn tell(from: &str, contents: &str) -> Message {
+    // FIXME: Parse/Pattern match the contents and determine who to send to
+    let from = String::from(from);
+    let to = String::from("to");
+    let contents = String::from("hello");
+
+    Message::DirectMessage { from, to, contents }
+}
+        
 fn handle_connection(
     mut buffer: BufReader<TcpStream>,
     tx: mpsc::Sender<Message>,
@@ -93,8 +112,7 @@ fn handle_connection(
             let contents = message.split_off(*index.get_or_insert_with( || message.len()));
             match message.as_ref() {
                 "/tell" => { 
-                    //Message::DirectMessage { from: username }
-                    //tx.send(Message::DirectMessage(username.clone(),)) see below
+                    tx.send(tell(&username, &contents));
                 },
                 _ => {}
             }
@@ -108,8 +126,15 @@ fn handle_connection(
     Ok(())
 }
 
+fn broadcast(message: &str, user_list: &mut UserList) {
+    let bytes = message.as_bytes();
+    for (user, data) in user_list {
+        data.socket.write(bytes).expect("Body failed to recieve.");
+    }
+}
+
 fn handle_server(rx: mpsc::Receiver<Message>) {
-    let mut user_list: HashMap<String, UserData> = HashMap::new();
+    let mut user_list: UserList = HashMap::new();
     let mut user_id = 0;
 
     loop {
@@ -118,9 +143,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                 //println!("{}: {}", username, message);
                 let body = format!("{}: {}", username, message);
                 // Send to all sockets in user_list
-                for (user, data) in &mut user_list {
-                    data.socket.write(body.as_bytes()).expect("Body failed to recieve.");
-                }
+                broadcast(&body, &mut user_list);
             }
             Message::Login(username, socket) => {
                 // TODO: Check if they're already logged in and close the connection. \
@@ -130,6 +153,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                 // TODO: Check if they've logged in too many times and disallow it
 
                 // Add to hashmap
+                broadcast(&format!("{} has connected.", username), &mut user_list);
                 user_list.insert(username, UserData { socket, user_id });
                 user_id += 1;
             }
@@ -145,7 +169,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
 
             }
             Message::Exit(username) => {
-                println!("{} has exited.", username);
+                broadcast(&format!("{} has exited.", username), &mut user_list);
             }
             _ => { }
         }
