@@ -116,10 +116,12 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
 
     match rx.recv().unwrap() {
         Message::Chat(username, message) => {
-            println!("{}: {}", username, message);
-            // TODO: Format the message's text
-
+            //println!("{}: {}", username, message);
+            let body = format!("{} says: {}", username, message);
             // TODO: Send to all sockets in user_list (iteration)
+            for (user, mut data) in user_list {
+                data.socket.write(message.as_bytes()).expect("Body failed to recieve.");
+            }
         }
         Message::Login(username, socket) => {
             // TODO: Check if they're already logged in and close the connection. \
@@ -144,7 +146,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
 
 fn main() -> Result<(), Box<dyn Error>> {
     // TODO: Read the address and port from some kind of input
-    let address = "127.0.0.1";
+    let address = "0.0.0.0";
     let port = 3000;
 
     let listener = TcpListener::bind(format!("{}:{}", address, port))?;
