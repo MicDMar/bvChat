@@ -54,33 +54,14 @@ enum Message {
 }
 
 fn check_login(username: &str, password: &str) -> bool {
-    // TODO: Check if this user is banned
-
-    // TODO: Check if the user has the correct password,
-    // creating the account if it does not exist
-    
     true
 }
 
-fn handle_connection(mut stream: &TcpStream, tx: mpsc::Sender<Message>) -> Result<(), impl Error> {
-    let mut username = String::new();
-    let mut password = String::new();
-    let socket = stream.try_clone().unwrap();
-    let mut buffer = BufReader::new(stream);
-
-    buffer.read_line(&mut username);
-    username.pop(); //Remove newline character
-    buffer.read_line(&mut password);
-
-    if check_login(&username, &password) {
-        println!("Successful login attempt");
-        tx.send(Message::Login(username.clone(), socket));
-        // login => { tx.send(Message::Login(login)); }
-    } else {
-        println!("Failed login attempt");
-        return Err(AuthenticationError {});
-    }
-
+fn handle_connection(
+    mut buffer: BufReader<TcpStream>,
+    tx: mpsc::Sender<Message>,
+    username: String
+) -> Result<(), Box<dyn Error>> {
     // Proceed to check for input and send to channel
     loop {
         // TODO: Check if the socket has been closed due to the server
@@ -95,15 +76,14 @@ fn handle_connection(mut stream: &TcpStream, tx: mpsc::Sender<Message>) -> Resul
             tx.send(Message::Exit(username));
             return Ok(());
         }
-
         // TODO: Check if this user is spamming their messages
 
         // Check for commands
         if message.starts_with("/") {
-            // TODO: Command processing
+            // Command processing
             // use String.split_off (?) to get the rest of the string
-            // Use get_or_else after finding location of space using find to split at specified index.
             let mut index = message.find(" ");
+            // If there isn't a space, get the whole word
             let contents = message.split_off(*index.get_or_insert_with( || message.len()));
             match message.as_ref() {
                 "/tell" => { 
@@ -112,8 +92,6 @@ fn handle_connection(mut stream: &TcpStream, tx: mpsc::Sender<Message>) -> Resul
                 },
                 _ => {}
             }
-            
-
         } else {
             // Broadcast message
             tx.send(Message::Chat(username.clone(), message.clone()));
@@ -127,14 +105,14 @@ fn handle_connection(mut stream: &TcpStream, tx: mpsc::Sender<Message>) -> Resul
 fn handle_server(rx: mpsc::Receiver<Message>) {
     let mut user_list: HashMap<String, UserData> = HashMap::new();
     let mut user_id = 0;
+
     loop {
         match rx.recv().unwrap() {
             Message::Chat(username, message) => {
                 //println!("{}: {}", username, message);
-                let body = format!("{} says: {}", username, message);
-                // TODO: Send to all sockets in user_list (iteration)
+                let body = format!("{}: {}", username, message);
+                // Send to all sockets in user_list
                 for (user, data) in &mut user_list {
-                    println!("see me now");
                     data.socket.write(body.as_bytes()).expect("Body failed to recieve.");
                 }
             }
@@ -144,19 +122,21 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                 // that may not know we're closing the connection 
 
                 // TODO: Check if they've logged in too many times and disallow it
-                    
+
                 // Add to hashmap
                 user_list.insert(username, UserData { socket, user_id });
                 user_id += 1;
             }
             Message::DirectMessage { from, to, contents } => {
                 let text = format!("{} tells you: {}", from, contents);
+
                 match user_list.entry(to) {
                     Occupied(mut d) => {   
                         d.get_mut().socket.write(text.as_bytes());
                     },
                     Vacant(_) => {}
                 }
+
             }
             Message::Exit(username) => {
                 println!("{} has exited.", username);
@@ -183,22 +163,41 @@ fn main() -> Result<(), Box<dyn Error>> {
     for stream in listener.incoming() {
         println!("User connected to server.");
         let mut stream = stream?;
-        let thread_tx = mpsc::Sender::clone(&tx); // Clone the transmitter so the thread can have its own
+        let mut socket = stream.try_clone()?;
 
-        thread::spawn(move || {
-            // TODO: Consider checking login information here, so we can
-            // quickly exit and send the username of who exited through tx
-            // This may also assist with keeping of times to prevent
-            // login after failing authentication too many times
+        // TODO: Check if this user is banned
 
-            match handle_connection(&stream, thread_tx) {
-                Err(err) => {
-                    writeln!(stream, "{}", err);
+        let mut username = String::new();
+        let mut password = String::new();
+
+        let mut buffer = BufReader::new(stream);
+
+        buffer.read_line(&mut username);
+        buffer.read_line(&mut password);
+
+        // Strip newline characters from end
+        username.pop();
+        password.pop();
+
+        if check_login(&username, &password) {
+            println!("Successful login attempt");
+            tx.send(Message::Login(username.clone(), socket.try_clone().unwrap()));
+
+            let thread_tx = mpsc::Sender::clone(&tx); // Clone the transmitter so the thread can have its own
+
+            thread::spawn(move || {
+                match handle_connection(buffer, thread_tx, username) {
+                    Err(err) => {
+                        writeln!(socket, "{}", err);
+                    }
+                    Ok(_) => { }
                 }
-                Ok(_) => { }
-            }
-            println!("User disconnected from server.");
-        });
+                println!("User disconnected from server.");
+            });
+        } else {
+            println!("Failed login attempt");
+            writeln!(socket, "Invalid login credentials");
+        }
     }
 
     Ok(())
