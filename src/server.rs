@@ -57,6 +57,13 @@ fn check_login(username: &str, password: &str) -> bool {
     true
 }
 
+fn is_admin(username: &str, user_list: &HashMap<String, UserData>) -> bool {
+    match user_list.iter().min_by(|a, b| a.1.user_id.cmp(&b.1.user_id)) {
+        Some(admin_username) => admin_username.0 == username,
+        None => false
+    }
+}
+
 fn handle_connection(
     mut buffer: BufReader<TcpStream>,
     tx: mpsc::Sender<Message>,
