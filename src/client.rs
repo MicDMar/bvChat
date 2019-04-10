@@ -42,7 +42,7 @@ fn handle_incoming_messages(mut stream: TcpStream){
     reader.read_line(&mut message).expect("Unable to read from buffer.");
     
     //TODO check if they don't have colon.
-    let mut username = message.split(":").collect(0);
+    let mut username: &str = message.split(":").collect()[0];
 
     //Check the username to see if they are blocked.
     if contents.contains(username){
@@ -78,23 +78,25 @@ fn send_messages(mut stream: TcpStream){
       let mut contents = String::new();
       file.read_to_string(&mut contents).expect("Couldn't read from block_list.txt.");
       //Parse through the contents and remove the matching username (if it exists) then write it back to file.
-      let mut v: Vec<str> = contents.split(" ");
+      let mut v: Vec<&str> = contents.split(" ").collect();
 
       let mut count = 0;
-      for name in &v{
-        if name == username{
+      for name in v{
+        let mut check_name: String = String::from(name);
+        if check_name == username{
           v.remove(count);
         }
         count += 1;
       }
 
       let mut new_contents = String::new();
-      for name in &v{
-        name.push_str(" ");
-        new_contents.push_str(name);
+      for name in v{
+        let mut new_name: String = String::from(name);
+        new_name.push_str(" ");
+        new_contents.push_str(&new_name);
       }
 
-      file.write(new_contents);
+      file.write(new_contents.as_bytes());
       print!("{} has been successfully unblocked!", username);
     }
     else { 
@@ -108,7 +110,6 @@ fn send_messages(mut stream: TcpStream){
 fn main() {
   let mut address = env::args().nth(1).unwrap();
   let mut port = env::args().nth(2).unwrap();
-  //let mut file = File::create("block_list.txt").except("Unable to create block_list.txt");
   
   let mut stream = TcpStream::connect(format!("{}:{}", address, port)).expect("Could not connect to server.");
   let mut stream2 = stream.try_clone().expect("Failed to clone this shit.");
