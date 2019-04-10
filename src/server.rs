@@ -129,10 +129,14 @@ fn handle_connection(
     Ok(())
 }
 
-fn broadcast(message: &str, user_list: &mut UserList) {
-    let bytes = message.as_bytes();
-    for (user, data) in user_list {
-        data.socket.write(bytes).expect("Body failed to recieve.");
+macro_rules! broadcast {
+    ($list:expr, $($arg:tt)*) => {
+        let message = format!($($arg)*);
+        let bytes = message.as_bytes();
+        $list.iter_mut().for_each(|(_key, val)| {
+            val.socket.write(bytes).expect("Failed to send");
+        });
+
     }
 }
 
@@ -146,7 +150,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                 //println!("{}: {}", username, message);
                 let body = format!("{}: {}", username, message);
                 // Send to all sockets in user_list
-                broadcast(&body, &mut user_list);
+                broadcast!(user_list, "{}: {}", username, message);
             }
             Message::Login(username, socket) => {
                 // TODO: Check if they're already logged in and close the connection. \
@@ -158,7 +162,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                 // TODO: Check and send any saved DMs
 
                 // Add to hashmap
-                broadcast(&format!("{} has connected.", username), &mut user_list);
+                broadcast!(user_list, "{} has connected", username); 
                 user_list.insert(username, UserData { socket, user_id });
                 user_id += 1;
             }
@@ -177,7 +181,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
 
             }
             Message::Exit(username) => {
-                broadcast(&format!("{} has exited.", username), &mut user_list);
+                broadcast!(user_list, "{} has exited.", username);
             }
             _ => { }
         }
