@@ -31,12 +31,16 @@ fn login(mut stream: &TcpStream){
 fn handle_incoming_messages(mut stream: TcpStream){
   //This is basically what we're going to do to read input from the server.
   let mut reader = BufReader::new(stream);
-  let mut file = OpenOptions::new().read(true).create(true).open("block_list.txt");
-
+  
   loop {
+    //Leave this here because we need to reopen it to "refresh" the block_list?
+    let mut file = OpenOptions::new().read(true).create(true).open("block_list.txt");
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).excecpt("Couldn't read from block_list.txt.");
+
     let mut message = String::new();
     reader.read_line(&mut message).expect("Unable to read from buffer.");
-    
+        
     //Check the username to see if they are blocked.
     if contents.contains(username)){
       //Ignore blocked users message.
@@ -47,9 +51,6 @@ fn handle_incoming_messages(mut stream: TcpStream){
       print!("{}", message);
     }
 
-
-    //Do we need to reopen the file to check and make sure the user hasn't added more blocked users?
-    let mut file = OpenOptions::new().read(true).create(true).open("block_list.txt");
   }
 }
 
