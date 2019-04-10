@@ -1,14 +1,9 @@
 use std::env;
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Write, prelude::*};
 use std::net::TcpStream;
 use std::str;
 use std::thread;
-
-enum Block {
-    block(String),
-    unblock(String),
-}
 
 fn login(mut stream: &TcpStream){
   //Ask for user to input their username and their password.
