@@ -1,5 +1,6 @@
 use std::env;
-use std::io::{self, BufRead, BufReader, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{self, BufRead, BufReader, Write, prelude::*};
 use std::net::TcpStream;
 use std::str;
 use std::thread;
@@ -30,31 +31,56 @@ fn login(mut stream: &TcpStream){
 fn handle_incoming_messages(mut stream: TcpStream){
   //This is basically what we're going to do to read input from the server.
   let mut reader = BufReader::new(stream);
+  let mut file = OpenOptions::new().read(true).create(true).open("block_list.txt");
+
   loop {
     let mut message = String::new();
     reader.read_line(&mut message).expect("Unable to read from buffer.");
     
-    //Check the username to see if they are blocked and ignore them.
-    if message.starts_with("/block"){
-      //Add the username that follows to the block list.
-    }
-    else if message.starts_with("/unblock"){
-      //Remove the username that follows from the block list.
+    //Check the username to see if they are blocked.
+    if contents.contains(username)){
+      //Ignore blocked users message.
+      continue;
     }
     else {
-      //check to see if the user that sent the message is in the 
+      //Print out the message as normal.
       print!("{}", message);
     }
 
+
+    //Do we need to reopen the file to check and make sure the user hasn't added more blocked users?
+    let mut file = OpenOptions::new().read(true).create(true).open("block_list.txt");
   }
 }
 
 fn send_messages(mut stream: TcpStream){
   //Create a new string here, ask for input and send it to the server.
   let mut input = String::new();
+  
   loop {
     io::stdin().read_line(&mut input).expect("Failed to read from stdin.");
-    stream.write(input.as_bytes()).expect("Failed to write to the server.");
+    
+    if input.starts_with("/block"){
+      //Add the username that follows to the block list.
+      let mut file = OpenOptions::new().append(true).create().open("block_list.txt").unwrap();
+      let username = input.split_off(7);
+      writeln!(file, username).except("Failed to write username to file.");
+      print!("{} has been successfully blocked!", username);
+    }
+    else if input.starts_with("/unblock"){
+      //Remove the username that follows from the block list.
+      let username = input.split_off(9);
+      let mut file = OpenOptions::new().read(true).write(true).create().open("block_list.txt").unwrap();
+      let mut contents = String::new();
+      file.read_to_string(&mut contents).excecpt("Couldn't read from block_list.txt.");
+      //Parse through the contents and remove the matching username (if it exists) then write it back to file.
+
+      print!("{} has been successfully unblocked!", username);
+    }
+    else { 
+      stream.write(input.as_bytes()).expect("Failed to write to the server.");
+    }
+    
     input.clear();
   }
 }
@@ -62,6 +88,7 @@ fn send_messages(mut stream: TcpStream){
 fn main() {
   let mut address = env::args().nth(1).unwrap();
   let mut port = env::args().nth(2).unwrap();
+  //let mut file = File::create("block_list.txt").except("Unable to create block_list.txt");
   
   let mut stream = TcpStream::connect(format!("{}:{}", address, port)).expect("Could not connect to server.");
   let mut stream2 = stream.try_clone().expect("Failed to clone this shit.");
