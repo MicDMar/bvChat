@@ -58,7 +58,8 @@ enum Message {
     // DirectMessage(String,String,String), // (from, to, contents) // tuple enum
     Exit(String), // (username)
     Login(String, TcpStream), // (username)
-    Motd()
+    Motd(String),
+    Help(String) //(username)
 }
 
 fn check_login(username: &str, password: &str) -> bool {
@@ -118,28 +119,16 @@ fn handle_connection(
             // Find which command this is
             let mut index = message.find(" ");
             // If there isn't a space, get the whole word
-            let contents = message.split_off(*index.get_or_insert_with( || message.len()));
+            let contents = message.split_off(*index.get_or_insert_with( || message.len() -1));
             match message.as_ref() {
                 "/help" => {
-                    println!("/who - Diplsays list of all users");
-                    println!("/exit - Disconnects from server and quit client");
-                    println!("/tell user message - Sends direct message to specified chat");
-                    println!("/motd - Diplsays message of the day");
-                    println!("/me - Display emote message");
-                    println!("/help - Display commands... You did it!");
-                    println!("/block user - Prevents user from recieving message from specified user");
-                    println!("/unblock user - Allow user to unblock previously blocked user");
-                    println!();
-                    println!("ADMIN ONLY COMMANDS");
-                    println!("/kick user - Kick user from server");
-                    println!("/ban user - Immediately kicks user from server and dissallows reconnection");
-                    println!("/unban user - Removes ban on specified user");
+                    tx.send(Message::Help(username.clone()));
                 }
                 "/tell" => { 
                     tx.send(tell(&username, &contents));
                 },
                 "/motd" => {
-                    tx.send(Message::Motd());
+                    tx.send(Message::Motd(username.clone()));
                 }
                 _ => {}
             }
@@ -168,6 +157,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
     let mut user_id = 0;
 
     loop {
+        
         match rx.recv().unwrap() {
             Message::Chat(username, message) => {
                 //println!("{}: {}", username, message);
@@ -206,10 +196,46 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
             Message::Exit(username) => {
                 broadcast!(user_list, "{} has exited.", username);
             }
-            Message::Motd() => {
+            Message::Motd(username) => {
                 let mut f = File::open("motd.txt").expect("Error opening file.");
                 let mut contents = String::new();
-                println!("{}",f.read_to_string(&mut contents).expect("Unable to read file."));
+                f.read_to_string(&mut contents).expect("Unable to read file.");
+                let text = format!("{}", contents);
+                match user_list.entry(username) {
+                    Occupied(mut d) => {   
+                        d.get_mut().socket.write(text.as_bytes());
+                    },
+                    Vacant(_) => {
+                        // TODO: There isn't a user by this name logged in
+                        // Save the message for later 
+                    }
+                }
+            }
+            
+            Message::Help(username) => {
+                let text = format!(" \t/who - Diplsays list of all users
+        /exit - Disconnects from server and quit client
+        /tell user message - Sends direct message to specified chat
+        /motd - Diplsays message of the day
+        /me - Display emote message
+        /help - Display commands... You did it!
+        /block user - Prevents user from recieving message from specified user
+        /unblock user - Allow user to unblock previously blocked user
+        \n ADMIN ONLY COMMANDS
+        /kick user - Kick user from server
+        /ban user - Immediately kicks user from server and dissallows reconnection
+        /unban user - Removes ban on specified user");
+                
+                
+                match user_list.entry(username) {
+                    Occupied(mut d) => {   
+                        d.get_mut().socket.write(text.as_bytes());
+                    },
+                    Vacant(_) => {
+                        // TODO: There isn't a user by this name logged in
+                        // Save the message for later 
+                    }
+                }
             }
             _ => { }
         }
