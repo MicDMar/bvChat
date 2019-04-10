@@ -2,11 +2,16 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::error::Error;
+use std::fs::File;
 use std::fmt;
+use std::io;
 use std::io::{BufReader, prelude::*};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
 use std::thread;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug)]
 struct AuthenticationError;
@@ -22,6 +27,8 @@ struct UserData {
     socket: TcpStream,
     user_id: i32,
 }
+
+type UserList = HashMap<String, UserData>;
 
 impl Ord for UserData {
     fn cmp(&self, other: &UserData) -> Ordering {
@@ -51,12 +58,41 @@ enum Message {
     // DirectMessage(String,String,String), // (from, to, contents) // tuple enum
     Exit(String), // (username)
     Login(String, TcpStream), // (username)
+    Motd(String),
+    Help(String) //(username)
 }
 
 fn check_login(username: &str, password: &str) -> bool {
+    // FIXME: Parse saved logins file to verify this. Create account if nonexistent
     true
 }
 
+/// Check if a user is the admin of the server
+fn is_admin(username: &str, user_list: &UserList) -> bool {
+    match get_admin(user_list) {
+        Some(user) => user == username,
+        None => false
+    }
+}
+
+/// Find the user with the lowest user_id
+fn get_admin(user_list: &UserList) -> Option<String> {
+    match user_list.iter().min_by(|a, b| a.1.user_id.cmp(&b.1.user_id)) {
+        Some(admin_username) => Some(admin_username.0.to_string()),
+        None => None
+    }
+}
+
+/// Build a Message to send a DirectMessage to another user
+fn tell(from: &str, contents: &str) -> Message {
+    // FIXME: Parse/Pattern match the contents and determine who to send to
+    let from = String::from(from);
+    let to = String::from("to");
+    let contents = String::from("hello");
+
+    Message::DirectMessage { from, to, contents }
+}
+        
 fn handle_connection(
     mut buffer: BufReader<TcpStream>,
     tx: mpsc::Sender<Message>,
@@ -80,16 +116,20 @@ fn handle_connection(
 
         // Check for commands
         if message.starts_with("/") {
-            // Command processing
-            // use String.split_off (?) to get the rest of the string
+            // Find which command this is
             let mut index = message.find(" ");
             // If there isn't a space, get the whole word
-            let contents = message.split_off(*index.get_or_insert_with( || message.len()));
+            let contents = message.split_off(*index.get_or_insert_with( || message.len() -1));
             match message.as_ref() {
+                "/help" => {
+                    tx.send(Message::Help(username.clone()));
+                }
                 "/tell" => { 
-                    //Message::DirectMessage { from: username }
-                    //tx.send(Message::DirectMessage(username.clone(),)) see below
+                    tx.send(tell(&username, &contents));
                 },
+                "/motd" => {
+                    tx.send(Message::Motd(username.clone()));
+                }
                 _ => {}
             }
         } else {
@@ -102,19 +142,28 @@ fn handle_connection(
     Ok(())
 }
 
+macro_rules! broadcast {
+    ($list:expr, $($arg:tt)*) => {
+        let message = format!($($arg)*);
+        let bytes = message.as_bytes();
+        $list.iter_mut().for_each(|(_key, val)| {
+            val.socket.write(bytes);
+        });
+    }
+}
+
 fn handle_server(rx: mpsc::Receiver<Message>) {
-    let mut user_list: HashMap<String, UserData> = HashMap::new();
+    let mut user_list: UserList = HashMap::new();
     let mut user_id = 0;
 
     loop {
+        
         match rx.recv().unwrap() {
             Message::Chat(username, message) => {
                 //println!("{}: {}", username, message);
                 let body = format!("{}: {}", username, message);
                 // Send to all sockets in user_list
-                for (user, data) in &mut user_list {
-                    data.socket.write(body.as_bytes()).expect("Body failed to recieve.");
-                }
+                broadcast!(user_list, "{}: {}", username, message);
             }
             Message::Login(username, socket) => {
                 // TODO: Check if they're already logged in and close the connection. \
@@ -123,7 +172,10 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
 
                 // TODO: Check if they've logged in too many times and disallow it
 
+                // TODO: Check and send any saved DMs
+
                 // Add to hashmap
+                broadcast!(user_list, "{} has connected", username); 
                 user_list.insert(username, UserData { socket, user_id });
                 user_id += 1;
             }
@@ -134,12 +186,56 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                     Occupied(mut d) => {   
                         d.get_mut().socket.write(text.as_bytes());
                     },
-                    Vacant(_) => {}
+                    Vacant(_) => {
+                        // TODO: There isn't a user by this name logged in
+                        // Save the message for later 
+                    }
                 }
 
             }
             Message::Exit(username) => {
-                println!("{} has exited.", username);
+                broadcast!(user_list, "{} has exited.", username);
+            }
+            Message::Motd(username) => {
+                let mut f = File::open("motd.txt").expect("Error opening file.");
+                let mut contents = String::new();
+                f.read_to_string(&mut contents).expect("Unable to read file.");
+                let text = format!("{}", contents);
+                match user_list.entry(username) {
+                    Occupied(mut d) => {   
+                        d.get_mut().socket.write(text.as_bytes());
+                    },
+                    Vacant(_) => {
+                        // TODO: There isn't a user by this name logged in
+                        // Save the message for later 
+                    }
+                }
+            }
+            
+            Message::Help(username) => {
+                let text = format!(" \t/who - Diplsays list of all users
+        /exit - Disconnects from server and quit client
+        /tell user message - Sends direct message to specified chat
+        /motd - Diplsays message of the day
+        /me - Display emote message
+        /help - Display commands... You did it!
+        /block user - Prevents user from recieving message from specified user
+        /unblock user - Allow user to unblock previously blocked user
+        \n ADMIN ONLY COMMANDS
+        /kick user - Kick user from server
+        /ban user - Immediately kicks user from server and dissallows reconnection
+        /unban user - Removes ban on specified user");
+                
+                
+                match user_list.entry(username) {
+                    Occupied(mut d) => {   
+                        d.get_mut().socket.write(text.as_bytes());
+                    },
+                    Vacant(_) => {
+                        // TODO: There isn't a user by this name logged in
+                        // Save the message for later 
+                    }
+                }
             }
             _ => { }
         }
