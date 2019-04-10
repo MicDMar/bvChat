@@ -4,6 +4,11 @@ use std::net::TcpStream;
 use std::str;
 use std::thread;
 
+enum Block {
+    block(String),
+    unblock(String),
+}
+
 fn login(mut stream: &TcpStream){
   //Ask for user to input their username and their password.
   let mut username = String::new();
@@ -27,9 +32,20 @@ fn handle_incoming_messages(mut stream: TcpStream){
   let mut reader = BufReader::new(stream);
   loop {
     let mut message = String::new();
-    //Check the username to see if they are blocked and ignore them.
     reader.read_line(&mut message).expect("Unable to read from buffer.");
-    print!("{}", message);
+    
+    //Check the username to see if they are blocked and ignore them.
+    if message.starts_with("/block"){
+      //Add the username that follows to the block list.
+    }
+    else if message.starts_with("/unblock"){
+      //Remove the username that follows from the block list.
+    }
+    else {
+      //check to see if the user that sent the message is in the 
+      print!("{}", message);
+    }
+
   }
 }
 
