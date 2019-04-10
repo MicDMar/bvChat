@@ -13,6 +13,21 @@ use std::thread;
 #[cfg(test)]
 mod tests;
 
+static command_text: &str = r#"AVAILABLE COMMANDS:
+    /who - Diplsays list of all users
+    /exit - Disconnects from server and quit client
+    /tell user message - Sends direct message to specified chat
+    /motd - Diplsays message of the day
+    /me - Display emote message
+    /help - Display commands... You did it!
+    /block user - Prevents user from recieving message from specified user
+    /unblock user - Allow user to unblock previously blocked user
+    
+    ADMIN ONLY COMMANDS
+    /kick user - Kick user from server
+    /ban user - Immediately kicks user from server and dissallows reconnection
+    /unban user - Removes ban on specified user"#;
+
 #[derive(Debug)]
 struct AuthenticationError;
 
@@ -119,7 +134,7 @@ fn handle_connection(
             // Find which command this is
             let mut index = message.find(" ");
             // If there isn't a space, get the whole word
-            let contents = message.split_off(*index.get_or_insert_with( || message.len() -1));
+            let contents = message.split_off(*index.get_or_insert_with(|| message.len() - 1));
             match message.as_ref() {
                 "/help" => {
                     tx.send(Message::Help(username.clone()));
@@ -213,23 +228,10 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
             }
             
             Message::Help(username) => {
-                let text = format!(" \t/who - Diplsays list of all users
-        /exit - Disconnects from server and quit client
-        /tell user message - Sends direct message to specified chat
-        /motd - Diplsays message of the day
-        /me - Display emote message
-        /help - Display commands... You did it!
-        /block user - Prevents user from recieving message from specified user
-        /unblock user - Allow user to unblock previously blocked user
-        \n ADMIN ONLY COMMANDS
-        /kick user - Kick user from server
-        /ban user - Immediately kicks user from server and dissallows reconnection
-        /unban user - Removes ban on specified user");
-                
-                
                 match user_list.entry(username) {
                     Occupied(mut d) => {   
-                        d.get_mut().socket.write(text.as_bytes());
+                        let mut socket = &d.get_mut().socket;
+                        writeln!(socket, "{}", command_text);
                     },
                     Vacant(_) => {
                         // TODO: There isn't a user by this name logged in
