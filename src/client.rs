@@ -34,15 +34,18 @@ fn handle_incoming_messages(mut stream: TcpStream){
   
   loop {
     //Leave this here because we need to reopen it to "refresh" the block_list?
-    let mut file = OpenOptions::new().read(true).create(true).open("block_list.txt");
+    let mut file = OpenOptions::new().read(true).create(true).open("block_list.txt").expect("Failed to open the file.");
     let mut contents = String::new();
-    file.read_to_string(&mut contents).excecpt("Couldn't read from block_list.txt.");
+    file.read_to_string(&mut contents).expect("Couldn't read from block_list.txt.");
 
     let mut message = String::new();
     reader.read_line(&mut message).expect("Unable to read from buffer.");
-        
+    
+    //TODO check if they don't have colon.
+    let mut username = message.split(":").collect(0);
+
     //Check the username to see if they are blocked.
-    if contents.contains(username)){
+    if contents.contains(username){
       //Ignore blocked users message.
       continue;
     }
@@ -63,19 +66,35 @@ fn send_messages(mut stream: TcpStream){
     
     if input.starts_with("/block"){
       //Add the username that follows to the block list.
-      let mut file = OpenOptions::new().append(true).create().open("block_list.txt").unwrap();
+      let mut file = OpenOptions::new().append(true).create(true).open("block_list.txt").unwrap();
       let username = input.split_off(7);
-      writeln!(file, username).except("Failed to write username to file.");
+      writeln!(file, "{}", username).expect("Failed to write username to file.");
       print!("{} has been successfully blocked!", username);
     }
     else if input.starts_with("/unblock"){
       //Remove the username that follows from the block list.
       let username = input.split_off(9);
-      let mut file = OpenOptions::new().read(true).write(true).create().open("block_list.txt").unwrap();
+      let mut file = OpenOptions::new().read(true).write(true).create(true).open("block_list.txt").unwrap();
       let mut contents = String::new();
-      file.read_to_string(&mut contents).excecpt("Couldn't read from block_list.txt.");
+      file.read_to_string(&mut contents).expect("Couldn't read from block_list.txt.");
       //Parse through the contents and remove the matching username (if it exists) then write it back to file.
+      let mut v: Vec<str> = contents.split(" ");
 
+      let mut count = 0;
+      for name in &v{
+        if name == username{
+          v.remove(count);
+        }
+        count += 1;
+      }
+
+      let mut new_contents = String::new();
+      for name in &v{
+        name.push_str(" ");
+        new_contents.push_str(name);
+      }
+
+      file.write(new_contents);
       print!("{} has been successfully unblocked!", username);
     }
     else { 
