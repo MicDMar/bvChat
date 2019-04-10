@@ -2,7 +2,9 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::error::Error;
+use std::fs::File;
 use std::fmt;
+use std::io;
 use std::io::{BufReader, prelude::*};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
@@ -53,6 +55,7 @@ enum Message {
     // DirectMessage(String,String,String), // (from, to, contents) // tuple enum
     Exit(String), // (username)
     Login(String, TcpStream), // (username)
+    Motd()
 }
 
 fn check_login(username: &str, password: &str) -> bool {
@@ -114,9 +117,27 @@ fn handle_connection(
             // If there isn't a space, get the whole word
             let contents = message.split_off(*index.get_or_insert_with( || message.len()));
             match message.as_ref() {
+                "/help" => {
+                    println!("/who - Diplsays list of all users");
+                    println!("/exit - Disconnects from server and quit client");
+                    println!("/tell user message - Sends direct message to specified chat");
+                    println!("/motd - Diplsays message of the day");
+                    println!("/me - Display emote message");
+                    println!("/help - Display commands... You did it!");
+                    println!("/block user - Prevents user from recieving message from specified user");
+                    println!("/unblock user - Allow user to unblock previously blocked user");
+                    println!();
+                    println!("ADMIN ONLY COMMANDS");
+                    println!("/kick user - Kick user from server");
+                    println!("/ban user - Immediately kicks user from server and dissallows reconnection");
+                    println!("/unban user - Removes ban on specified user");
+                }
                 "/tell" => { 
                     tx.send(tell(&username, &contents));
                 },
+                "/motd" => {
+                    tx.send(Message::Motd());
+                }
                 _ => {}
             }
         } else {
@@ -182,6 +203,11 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
             }
             Message::Exit(username) => {
                 broadcast!(user_list, "{} has exited.", username);
+            }
+            Message::Motd() => {
+                let mut f = File::open("motd.txt").expect("Error opening file.");
+                let mut contents = String::new();
+                println!("{}",f.read_to_string(&mut contents).expect("Unable to read file."));
             }
             _ => { }
         }
