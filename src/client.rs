@@ -37,7 +37,8 @@ fn handle_incoming_messages(mut stream: TcpStream){
     reader.read_line(&mut message).expect("Unable to read from buffer.");
     
     //TODO check if they don't have colon.
-    let mut username: &str = message.split(":").collect()[0];
+    let mut split: Vec<&str> = message.split(":").collect();
+    let mut username = split[0];
 
     //Check the username to see if they are blocked.
     if contents.contains(username){
@@ -75,14 +76,21 @@ fn send_messages(mut stream: TcpStream){
       //Parse through the contents and remove the matching username (if it exists) then write it back to file.
       let mut v: Vec<&str> = contents.split(" ").collect();
 
-      let mut count = 0;
-      for name in v{
+      let username = match v.get(0) {
+        Some(user) => user,
+        None => ""
+      };
+
+      v.retain(|name| name != &username);
+      /*
+      for name in &v {
         let mut check_name: String = String::from(name);
         if check_name == username{
           v.remove(count);
         }
         count += 1;
       }
+      */
 
       let mut new_contents = String::new();
       for name in v{
