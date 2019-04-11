@@ -29,7 +29,7 @@ fn handle_incoming_messages(mut stream: TcpStream){
   
   loop {
     //Leave this here because we need to reopen it to "refresh" the block_list?
-    let mut file = OpenOptions::new().read(true).create(true).open("block_list.txt").expect("Failed to open the file.");
+    let mut file = OpenOptions::new().read(true).open("block_list.txt").expect("Failed to open file.");
     let mut contents = String::new();
     file.read_to_string(&mut contents).expect("Couldn't read from block_list.txt.");
 
@@ -82,15 +82,6 @@ fn send_messages(mut stream: TcpStream){
       };
 
       v.retain(|name| name != &username);
-      /*
-      for name in &v {
-        let mut check_name: String = String::from(name);
-        if check_name == username{
-          v.remove(count);
-        }
-        count += 1;
-      }
-      */
 
       let mut new_contents = String::new();
       for name in v{
@@ -111,6 +102,8 @@ fn send_messages(mut stream: TcpStream){
 }
 
 fn main() {
+  let mut file = OpenOptions::new().create(true).write(true).open("block_list.txt").expect("Failed to create the file.");
+  file.write(b"");
   let mut address = env::args().nth(1).unwrap();
   let mut port = env::args().nth(2).unwrap();
   
