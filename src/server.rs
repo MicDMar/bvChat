@@ -2,11 +2,12 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::error::Error;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::fmt;
 use std::io;
 use std::io::{BufReader, prelude::*};
 use std::net::{TcpListener, TcpStream};
+use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 
@@ -76,10 +77,46 @@ enum Message {
     Motd(String),
     Help(String) //(username)
 }
+fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
+    let file = File::open(filename).expect("No such path file exists.");
+    let buffer = BufReader::new(file);
+    buffer.lines().map( |l| l.expect("Error parsing.")).collect()
+}
 
 fn check_login(username: &str, password: &str) -> bool {
     // FIXME: Parse saved logins file to verify this. Create account if nonexistent
-    true
+    let lines = lines_from_file("userdata.txt");
+    let mut c = 0;
+    let mut users = Vec::new();
+    let mut pw = Vec::new();
+    let mut f = OpenOptions::new().write(true).append(true).open("userdata.txt").unwrap();
+    for line in lines {
+        if c % 2 == 0 {
+            users.push(line);
+        }
+        else {
+            pw.push(line);
+        }
+        c += 1;
+    }
+
+    if users.contains(&username.to_string()) { 
+        if pw.contains(&password.to_string()) {
+            true
+        }
+        else {
+            false
+        }
+    }
+    else {
+        if let Err(e) = writeln!(f, "{}", username) {
+            eprintln!("Couldn't write to file: {}", e);
+        }
+        if let Err(e) = writeln!(f, "{}", password) {
+            eprintln!("Couldn't write to file: {}", e);
+        }
+        true
+    }
 }
 
 /// Check if a user is the admin of the server
