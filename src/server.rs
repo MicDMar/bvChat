@@ -156,6 +156,13 @@ fn check_ban(username: &str) -> bool {
     }
 }
 
+fn add_ban(username: &str) {
+    let mut file = OpenOptions::new().append(true).open("banlist").unwrap();
+    if let Err(e) = writeln!(file, "{}", username) {
+        eprintln!("Couldn't ban user: {}", username);
+    }
+}
+
 /// Build a Message to send a DirectMessage to another user
 fn tell(from: &str, contents: &str) -> Message {
     // FIXME: Parse/Pattern match the contents and determine who to send to
