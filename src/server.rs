@@ -116,16 +116,18 @@ struct TimeoutCounter {
     attempts: VecDeque<Instant>,
     max_attempts: usize,
     clear_time: Option<Instant>,
+    penalty_delay: u64,
 }
 
 impl TimeoutCounter {
-    fn with_limit(max_attempts: usize) -> Self {
+    fn new(max_attempts: usize, penalty_delay: u64) -> Self {
         let attempts = VecDeque::with_capacity(max_attempts);
 
         TimeoutCounter {
             attempts,
             max_attempts,
-            clear_time: None
+            clear_time: None,
+            penalty_delay,
         }
     }
 
@@ -141,7 +143,7 @@ impl TimeoutCounter {
         // Check if we've previously triggered this
         match self.clear_time {
             Some(instant) => {
-                if instant.elapsed() > Duration::new(SPAM_DELAY, 0) {
+                if instant.elapsed() > Duration::new(self.penalty_delay, 0) {
                     // Clear the stored times
                     self.attempts.clear();
                     self.clear_time = None;
@@ -177,13 +179,9 @@ fn handle_connection(
     username: String
 ) -> Result<(), Box<dyn Error>> {
     // Proceed to check for input and send to channel
-    let mut timeout = TimeoutCounter::with_limit(5);
+    let mut timeout = TimeoutCounter::new(5, SPAM_DELAY);
 
     loop {
-        // TODO: Check if the socket has been closed due to the server
-        // We may not have to do this, as the connection being closed
-        // should trigger the client to also send this response
-
         let mut message = String::new();
         buffer.read_line(&mut message);
 
@@ -193,7 +191,7 @@ fn handle_connection(
             return Ok(());
         }
 
-        // TODO: Check if this user is spamming their messages
+        // Check if this user is spamming their messages
         timeout.mark();
         if timeout.triggered() {
             tx.send(Message::Spam(username.clone()));
@@ -344,10 +342,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         handle_server(rx);
     });
 
+    let mut attempts: HashMap<String, TimeoutCounter> = HashMap::new();
+
     for stream in listener.incoming() {
-        println!("User connected to server.");
         let mut stream = stream?;
+        let ip = stream.peer_addr()?.ip().to_string();
+        println!("Connection received from {}", ip);
         let mut socket = stream.try_clone()?;
+
+        // Check if this ip has made too many attempts
+        match attempts.get_mut(&ip) {
+            Some(mut counter) => {
+                if counter.triggered() {
+                    writeln!(stream, "Too many connections. Please wait 3 minutes");
+                    continue;
+                }
+            }
+            None => { }
+        }
 
         // TODO: Check if this user is banned
 
@@ -380,7 +392,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             });
         } else {
             println!("Failed login attempt");
-            writeln!(socket, "Invalid login credentials");
+            match attempts.entry(ip) {
+                Occupied(mut o) => {
+                    let counter = &mut o.get_mut();
+                    counter.mark();
+                }
+                Vacant(mut o) => {
+                    // FIXME: Change this counter to follow the numbers in the spec
+                    o.insert(TimeoutCounter::new(5, 120));
+                }
+            }
+
         }
     }
 
