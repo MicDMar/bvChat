@@ -152,12 +152,13 @@ fn tell(from: &str, contents: &str) -> Message {
 struct TimeoutCounter {
     attempts: VecDeque<Instant>,
     max_attempts: usize,
-    clear_time: Option<Instant>,
-    penalty_delay: u64,
+    clear_time: Option<Instant>, // The time the counter was triggered
+    penalty_delay: u64, // How long until we reset the count after triggering
+    window_size: u64,
 }
 
 impl TimeoutCounter {
-    fn new(max_attempts: usize, penalty_delay: u64) -> Self {
+    fn new(max_attempts: usize, penalty_delay: u64, window_size: u64) -> Self {
         let attempts = VecDeque::with_capacity(max_attempts);
 
         TimeoutCounter {
@@ -165,6 +166,7 @@ impl TimeoutCounter {
             max_attempts,
             clear_time: None,
             penalty_delay,
+            window_size,
         }
     }
 
@@ -178,6 +180,7 @@ impl TimeoutCounter {
 
     fn triggered(&mut self) -> bool {
         // Check if we've previously triggered this
+        println!("{:?}", self.attempts);
         match self.clear_time {
             Some(instant) => {
                 if instant.elapsed() > Duration::new(self.penalty_delay, 0) {
@@ -198,7 +201,7 @@ impl TimeoutCounter {
             let now = Instant::now();
             match self.attempts.front() {
                 Some(instant) => {
-                    let triggered = instant.elapsed() < Duration::new(5, 0);
+                    let triggered = instant.elapsed() < Duration::new(self.window_size, 0);
                     if triggered {
                         self.clear_time = Some(Instant::now()); 
                     }
@@ -216,7 +219,7 @@ fn handle_connection(
     username: String
 ) -> Result<(), Box<dyn Error>> {
     // Proceed to check for input and send to channel
-    let mut timeout = TimeoutCounter::new(5, SPAM_DELAY);
+    let mut timeout = TimeoutCounter::new(5, SPAM_DELAY, 5);
 
     loop {
         let mut message = String::new();
@@ -388,14 +391,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut socket = stream.try_clone()?;
 
         // Check if this ip has made too many attempts
-        match attempts.get_mut(&ip) {
-            Some(mut counter) => {
+        match attempts.entry(ip.clone()) {
+            Occupied(mut o) => {   
+                let mut counter = o.get_mut();
                 if counter.triggered() {
-                    writeln!(stream, "Too many connections. Please wait 3 minutes");
+                    writeln!(stream, "Too many connections. Please wait 2 minutes");
                     continue;
                 }
-            }
-            None => { }
+            },
+            _ => { }
         }
 
         // TODO: Check if this user is banned
@@ -435,8 +439,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     counter.mark();
                 }
                 Vacant(mut o) => {
-                    // FIXME: Change this counter to follow the numbers in the spec
-                    o.insert(TimeoutCounter::new(5, 120));
+                    o.insert(TimeoutCounter::new(5, 120, 30));
                 }
             }
 
