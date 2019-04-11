@@ -16,6 +16,7 @@ use std::thread::sleep;
 #[cfg(test)]
 mod tests;
 
+const BAN_FILE: &str = "banned_users.txt";
 const COMMAND_TEXT: &str = r#"AVAILABLE COMMANDS:
     /who - Diplsays list of all users
     /exit - Disconnects from server and quit client
@@ -25,61 +26,33 @@ const COMMAND_TEXT: &str = r#"AVAILABLE COMMANDS:
     /help - Display commands... You did it!
     /block user - Prevents user from recieving message from specified user
     /unblock user - Allow user to unblock previously blocked user
-    
+
     ADMIN ONLY COMMANDS
     /kick user - Kick user from server
     /ban user - Immediately kicks user from server and dissallows reconnection
     /unban user - Removes ban on specified user"#;
 
-const SPAM_DELAY: u64 = 20;
+    const SPAM_DELAY: u64 = 20;
 
-#[derive(Debug)]
-struct AuthenticationError;
-
-impl fmt::Display for AuthenticationError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Incorrect password entered")
+    type UserList = HashMap<String, UserData>;
+    struct UserData {
+        socket: TcpStream,
+        user_id: i32,
     }
-}
-impl Error for AuthenticationError {}
-
-struct UserData {
-    socket: TcpStream,
-    user_id: i32,
-}
-
-type UserList = HashMap<String, UserData>;
-
-impl Ord for UserData {
-    fn cmp(&self, other: &UserData) -> Ordering {
-        self.user_id.cmp(&other.user_id)
-    }
-}
-
-impl PartialOrd for UserData {
-    fn partial_cmp(&self, other: &UserData) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for UserData {
-    fn eq(&self, other: &UserData) -> bool {
-        self.user_id == other.user_id
-    }
-}
-impl Eq for UserData {}
 
 #[derive(Debug)]
 enum Message {
     // TODO: Add any other options for other actions/commands
     // TODO: Decide to use tuple enum or struct enum
+    Ban(String,String), // (banner,bannee)
     Chat(String,String), // (sender,contents)
     DirectMessage { from: String, to: String, contents: String }, // struct enum
     Exit(String), // (username)
     Login(String, TcpStream), // (username)
-    Motd(String),
+    Motd(String), // (username)
     Help(String), //(username)
     Spam(String), // (username)
+    Unban(String,String), // (banner,bannee)
 }
 fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
     let file = File::open(filename).expect("No such path file exists.");
@@ -156,19 +129,20 @@ fn check_ban(username: &str) -> bool {
     }
 }
 
-fn add_ban(username: &str) {
-    let mut file = OpenOptions::new().append(true).open("banlist").unwrap();
-    if let Err(e) = writeln!(file, "{}", username) {
-        eprintln!("Couldn't ban user: {}", username);
+fn ban(username: &str) {
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(BAN_FILE) {
+        if let Err(e) = writeln!(file, "{}", username) {
+            eprintln!("Couldn't ban user: {}", username);
+        }
     }
 }
 
 /// Build a Message to send a DirectMessage to another user
-fn tell(from: &str, contents: &str) -> Message {
+fn tell(from: &str, to: &str, contents: &str) -> Message {
     // FIXME: Parse/Pattern match the contents and determine who to send to
     let from = String::from(from);
-    let to = String::from("to");
-    let contents = String::from("hello");
+    let to = String::from(to);
+    let contents = String::from(contents);
 
     Message::DirectMessage { from, to, contents }
 }
@@ -236,7 +210,7 @@ impl TimeoutCounter {
         }
     }
 }
-        
+
 fn handle_connection(
     mut buffer: BufReader<TcpStream>,
     tx: mpsc::Sender<Message>,
@@ -266,13 +240,22 @@ fn handle_connection(
                 // Find which command this is
                 let mut index = message.find(" ");
                 // If there isn't a space, get the whole word
-                let contents = message.split_off(*index.get_or_insert_with(|| message.len() - 1));
+                let mut contents = message.split_off(*index.get_or_insert_with(|| message.len() - 1));
                 match message.as_ref() {
                     "/help" => {
                         tx.send(Message::Help(username.clone()));
                     }
                     "/tell" => { 
-                        tx.send(tell(&username, &contents));
+                        let contents = String::from(&contents[1..contents.len()-1]); // Extract rest of string
+                        match contents.find(' ') {
+                            Some(index) => {
+                                tx.send(tell(&username, &contents[0..index], &contents[index+1..contents.len()]));
+                            }
+                            None => {
+                                tx.send(tell("Server", &username, "Invalid /tell format"));
+                            }
+                        }
+                        println!("{:?}", contents);
                     },
                     "/motd" => {
                         tx.send(Message::Motd(username.clone()));
@@ -280,6 +263,16 @@ fn handle_connection(
                     "/exit" => {
                         tx.send(Message::Exit(username.clone()));
                         break;
+                    }
+                    "/ban" => {
+                        let contents = String::from(&contents[1..contents.len()-1]);
+                        println!("{:?}", contents);
+                        tx.send(Message::Ban(username.clone(), contents)); 
+                    }
+                    "/unban" => {
+                        let contents = String::from(&contents[1..contents.len()-1]);
+                        println!("{:?}", contents);
+                        tx.send(Message::Unban(username.clone(), contents));
                     }
                     _ => {}
                 }
@@ -310,7 +303,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
     let mut saved_messages: HashMap<String,Vec<String>> = HashMap::new();
 
     loop {
-        
+
         match rx.recv().unwrap() {
             Message::Chat(username, message) => {
                 //println!("{}: {}", username, message);
@@ -364,7 +357,6 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                     }
                 }
             }
-            
             Message::Help(username) => {
                 match user_list.entry(username) {
                     Occupied(mut d) => {   
@@ -385,10 +377,43 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                     },
                     _ => { }
                 }
+
+            }
+            Message::Ban(banner, bannee) => {
+                if is_admin(&banner, &user_list) {
+                    ban(&bannee);
+                    broadcast!(user_list, "{} has been banned.", bannee);
+                }
+            }
+            Message::Unban(banner, bannee) => {
+                if is_admin(&banner, &user_list) {
+                    unban(&banner);
+                    broadcast!(user_list, "{} has been unbanned.", bannee);
+                }
                 
             }
             _ => { }
         }
+    }
+}
+
+fn unban(username: &str) {
+    // Search and remove the line for this user if it exists
+    if let Ok(file) = File::open(BAN_FILE) {
+        let buf = BufReader::new(file); 
+        let new_contents: Vec<String> = buf.lines().filter_map(|line| {
+            match line { 
+                Ok(line) => {
+                    if line == username {
+                        return None
+                    }
+                    Some(line)
+                }
+                Err(_) => None
+            }
+        }).collect();
+        let mut file = OpenOptions::new().write(true).truncate(true).open(BAN_FILE).unwrap();
+        new_contents.iter().for_each(|line| { file.write(line.as_bytes()); });
     }
 }
 
