@@ -139,6 +139,23 @@ fn get_admin(user_list: &UserList) -> Option<String> {
     }
 }
 
+fn check_ban(username: &str) -> bool {
+    match OpenOptions::new().open("banlist") {
+        Ok(file) => {
+            let buf = BufReader::new(file);
+            for line in buf.lines() {
+                let mut line = line.unwrap();
+                line.pop();
+                if line == username {
+                    return true;
+                }
+            }
+            false
+        }
+        Err(_) => false
+    }
+}
+
 /// Build a Message to send a DirectMessage to another user
 fn tell(from: &str, contents: &str) -> Message {
     // FIXME: Parse/Pattern match the contents and determine who to send to
@@ -395,14 +412,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             Occupied(mut o) => {   
                 let mut counter = o.get_mut();
                 if counter.triggered() {
-                    writeln!(stream, "Too many connections. Please wait 2 minutes");
+                    writeln!(socket, "Too many connections. Please wait 2 minutes");
                     continue;
                 }
             },
             _ => { }
         }
 
-        // TODO: Check if this user is banned
 
         let mut username = String::new();
         let mut password = String::new();
@@ -415,6 +431,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Strip newline characters from end
         username.pop();
         password.pop();
+
+        if check_ban(&username) {
+            writeln!(socket, "You have been banned from this server.");
+            continue;
+        }
 
         if check_login(&username, &password) {
             println!("Successful login attempt");
