@@ -27,29 +27,32 @@ fn handle_incoming_messages(mut stream: TcpStream){
   //This is basically what we're going to do to read input from the server.
   let mut reader = BufReader::new(stream);
   
-  loop {
-    //Leave this here because we need to reopen it to "refresh" the block_list?
-    let mut file = OpenOptions::new().read(true).open("block_list.txt").expect("Failed to open file.");
-    let mut contents = String::new();
-    file.read_to_string(&mut contents).expect("Couldn't read from block_list.txt.");
-
+  'outer: loop {
     let mut message = String::new();
     reader.read_line(&mut message).expect("Unable to read from buffer.");
     
-    //TODO check if they don't have colon.
+    // TODO: Check if they don't have colon.
     let mut split: Vec<&str> = message.split(":").collect();
-    let mut username = split[0];
+    let mut username = String::from(split[0]);
+    // username.pop();
 
-    //Check the username to see if they are blocked.
-    if contents.contains(username){
-      //Ignore blocked users message.
-      continue;
+    //Leave this here because we need to reopen it to "refresh" the block_list?
+    match OpenOptions::new().read(true).open("block_list.txt") {
+        Ok(file) => {
+            let buf = BufReader::new(file);
+            for line in buf.lines() {
+                let mut line = line.unwrap();
+                //Check the username to see if they are blocked.
+                if line == username {
+                    // Ignore blocked users message.
+                    continue 'outer;
+                } 
+            }
+        }
+        Err(_) => { }
     }
-    else {
-      //Print out the message as normal.
-      print!("{}", message);
-    }
-
+    //Print out the message as normal.
+    print!("{}", message);
   }
 }
 
@@ -65,33 +68,31 @@ fn send_messages(mut stream: TcpStream){
       let mut file = OpenOptions::new().append(true).create(true).open("block_list.txt").unwrap();
       let username = input.split_off(7);
       writeln!(file, "{}", username).expect("Failed to write username to file.");
-      print!("{} has been successfully blocked!", username);
+      println!("{} has been successfully blocked!", username);
     }
     else if input.starts_with("/unblock"){
       //Remove the username that follows from the block list.
-      let username = input.split_off(9);
-      let mut file = OpenOptions::new().read(true).write(true).create(true).open("block_list.txt").unwrap();
-      let mut contents = String::new();
-      file.read_to_string(&mut contents).expect("Couldn't read from block_list.txt.");
-      //Parse through the contents and remove the matching username (if it exists) then write it back to file.
-      let mut v: Vec<&str> = contents.split(" ").collect();
+      let mut username = input.split_off(9);
+      username.pop();
 
-      let username = match v.get(0) {
-        Some(user) => user,
-        None => ""
-      };
-
-      v.retain(|name| name != &username);
-
-      let mut new_contents = String::new();
-      for name in v{
-        let mut new_name: String = String::from(name);
-        new_name.push_str(" ");
-        new_contents.push_str(&new_name);
+      use std::fs::File;
+      if let Ok(file) = File::open("block_list.txt") {
+        let buf = BufReader::new(file); 
+        let new_contents: Vec<String> = buf.lines().filter_map(|line| {
+            match line {
+                Ok(line) => {
+                    if line == username {
+                        return None
+                    }
+                    Some(line)
+                }
+                Err(_) => None
+            }
+        }).collect();
+          let mut file = OpenOptions::new().write(true).truncate(true).open("block_list.txt").unwrap();
+          new_contents.iter().for_each(|line| { file.write(line.as_bytes()); });
       }
-
-      file.write(new_contents.as_bytes());
-      print!("{} has been successfully unblocked!", username);
+      println!("{} has been successfully unblocked!", username);
     }
     else { 
       stream.write(input.as_bytes()).expect("Failed to write to the server.");
