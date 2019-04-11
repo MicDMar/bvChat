@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::error::Error;
 use std::fs::File;
@@ -8,12 +8,14 @@ use std::io;
 use std::io::{BufReader, prelude::*};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use std::thread;
+use std::thread::sleep;
 
 #[cfg(test)]
 mod tests;
 
-static command_text: &str = r#"AVAILABLE COMMANDS:
+const COMMAND_TEXT: &str = r#"AVAILABLE COMMANDS:
     /who - Diplsays list of all users
     /exit - Disconnects from server and quit client
     /tell user message - Sends direct message to specified chat
@@ -27,6 +29,8 @@ static command_text: &str = r#"AVAILABLE COMMANDS:
     /kick user - Kick user from server
     /ban user - Immediately kicks user from server and dissallows reconnection
     /unban user - Removes ban on specified user"#;
+
+const SPAM_DELAY: u64 = 20;
 
 #[derive(Debug)]
 struct AuthenticationError;
@@ -70,11 +74,11 @@ enum Message {
     // TODO: Decide to use tuple enum or struct enum
     Chat(String,String), // (sender,contents)
     DirectMessage { from: String, to: String, contents: String }, // struct enum
-    // DirectMessage(String,String,String), // (from, to, contents) // tuple enum
     Exit(String), // (username)
     Login(String, TcpStream), // (username)
     Motd(String),
-    Help(String) //(username)
+    Help(String), //(username)
+    Spam(String), // (username)
 }
 
 fn check_login(username: &str, password: &str) -> bool {
@@ -107,6 +111,65 @@ fn tell(from: &str, contents: &str) -> Message {
 
     Message::DirectMessage { from, to, contents }
 }
+
+struct TimeoutCounter {
+    attempts: VecDeque<Instant>,
+    max_attempts: usize,
+    clear_time: Option<Instant>,
+}
+
+impl TimeoutCounter {
+    fn with_limit(max_attempts: usize) -> Self {
+        let attempts = VecDeque::with_capacity(max_attempts);
+
+        TimeoutCounter {
+            attempts,
+            max_attempts,
+            clear_time: None
+        }
+    }
+
+    fn mark(&mut self) {
+        if self.attempts.len() == self.max_attempts {
+            self.attempts.pop_front();
+        }
+
+        self.attempts.push_back(Instant::now());
+    }
+
+    fn triggered(&mut self) -> bool {
+        // Check if we've previously triggered this
+        match self.clear_time {
+            Some(instant) => {
+                if instant.elapsed() > Duration::new(SPAM_DELAY, 0) {
+                    // Clear the stored times
+                    self.attempts.clear();
+                    self.clear_time = None;
+                    return false;
+                } else {
+                    return true;
+                }
+            }
+            None => { }
+        }
+
+        if self.attempts.len() < self.max_attempts {
+            false
+        } else {
+            let now = Instant::now();
+            match self.attempts.front() {
+                Some(instant) => {
+                    let triggered = instant.elapsed() < Duration::new(5, 0);
+                    if triggered {
+                        self.clear_time = Some(Instant::now()); 
+                    }
+                    triggered
+                }
+                None => false
+            }
+        }
+    }
+}
         
 fn handle_connection(
     mut buffer: BufReader<TcpStream>,
@@ -114,6 +177,8 @@ fn handle_connection(
     username: String
 ) -> Result<(), Box<dyn Error>> {
     // Proceed to check for input and send to channel
+    let mut timeout = TimeoutCounter::with_limit(5);
+
     loop {
         // TODO: Check if the socket has been closed due to the server
         // We may not have to do this, as the connection being closed
@@ -127,29 +192,39 @@ fn handle_connection(
             tx.send(Message::Exit(username));
             return Ok(());
         }
-        // TODO: Check if this user is spamming their messages
 
-        // Check for commands
-        if message.starts_with("/") {
-            // Find which command this is
-            let mut index = message.find(" ");
-            // If there isn't a space, get the whole word
-            let contents = message.split_off(*index.get_or_insert_with(|| message.len() - 1));
-            match message.as_ref() {
-                "/help" => {
-                    tx.send(Message::Help(username.clone()));
-                }
-                "/tell" => { 
-                    tx.send(tell(&username, &contents));
-                },
-                "/motd" => {
-                    tx.send(Message::Motd(username.clone()));
-                }
-                _ => {}
-            }
+        // TODO: Check if this user is spamming their messages
+        timeout.mark();
+        if timeout.triggered() {
+            tx.send(Message::Spam(username.clone()));
         } else {
-            // Broadcast message
-            tx.send(Message::Chat(username.clone(), message.clone()));
+
+            // Check for commands
+            if message.starts_with("/") {
+                // Find which command this is
+                let mut index = message.find(" ");
+                // If there isn't a space, get the whole word
+                let contents = message.split_off(*index.get_or_insert_with(|| message.len() - 1));
+                match message.as_ref() {
+                    "/help" => {
+                        tx.send(Message::Help(username.clone()));
+                    }
+                    "/tell" => { 
+                        tx.send(tell(&username, &contents));
+                    },
+                    "/motd" => {
+                        tx.send(Message::Motd(username.clone()));
+                    }
+                    "/exit" => {
+                        tx.send(Message::Exit(username.clone()));
+                        break;
+                    }
+                    _ => {}
+                }
+            } else {
+                // Broadcast message
+                tx.send(Message::Chat(username.clone(), message.clone()));
+            }
         }
 
         println!("{}", message);
@@ -160,9 +235,8 @@ fn handle_connection(
 macro_rules! broadcast {
     ($list:expr, $($arg:tt)*) => {
         let message = format!($($arg)*);
-        let bytes = message.as_bytes();
         $list.iter_mut().for_each(|(_key, val)| {
-            val.socket.write(bytes);
+            writeln!(val.socket, "{}", message);
         });
     }
 }
@@ -170,6 +244,8 @@ macro_rules! broadcast {
 fn handle_server(rx: mpsc::Receiver<Message>) {
     let mut user_list: UserList = HashMap::new();
     let mut user_id = 0;
+
+    let mut saved_messages: HashMap<String,Vec<String>> = HashMap::new();
 
     loop {
         
@@ -195,11 +271,10 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                 user_id += 1;
             }
             Message::DirectMessage { from, to, contents } => {
-                let text = format!("{} tells you: {}", from, contents);
-
                 match user_list.entry(to) {
                     Occupied(mut d) => {   
-                        d.get_mut().socket.write(text.as_bytes());
+                        let mut socket = &d.get_mut().socket;
+                        writeln!(socket, "{} tells you: {}", from, contents);
                     },
                     Vacant(_) => {
                         // TODO: There isn't a user by this name logged in
@@ -223,6 +298,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                     Vacant(_) => {
                         // TODO: There isn't a user by this name logged in
                         // Save the message for later 
+
                     }
                 }
             }
@@ -231,13 +307,23 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                 match user_list.entry(username) {
                     Occupied(mut d) => {   
                         let mut socket = &d.get_mut().socket;
-                        writeln!(socket, "{}", command_text);
+                        writeln!(socket, "{}", COMMAND_TEXT);
                     },
                     Vacant(_) => {
                         // TODO: There isn't a user by this name logged in
                         // Save the message for later 
                     }
                 }
+            }
+            Message::Spam(username) => {
+                match user_list.entry(username) {
+                    Occupied(mut d) => {   
+                        let mut socket = &d.get_mut().socket;
+                        writeln!(socket, "Too many messages sent too quickly. Please wait 20 seconds before sending again.");
+                    },
+                    _ => { }
+                }
+                
             }
             _ => { }
         }
