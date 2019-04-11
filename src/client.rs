@@ -65,7 +65,7 @@ fn send_messages(mut stream: TcpStream){
       let mut file = OpenOptions::new().append(true).create(true).open("block_list.txt").unwrap();
       let username = input.split_off(7);
       writeln!(file, "{}", username).expect("Failed to write username to file.");
-      print!("{} has been successfully blocked!", username);
+      println!("{} has been successfully blocked!", username);
     }
     else if input.starts_with("/unblock"){
       //Remove the username that follows from the block list.
@@ -91,7 +91,7 @@ fn send_messages(mut stream: TcpStream){
       }
 
       file.write(new_contents.as_bytes());
-      print!("{} has been successfully unblocked!", username);
+      println!("{} has been successfully unblocked!", username);
     }
     else { 
       stream.write(input.as_bytes()).expect("Failed to write to the server.");
