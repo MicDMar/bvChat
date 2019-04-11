@@ -26,4 +26,4 @@ cargo run --bin client $IP $PORT
 'localhost' is a valid local IP
 Port is 3000 by default
 
-*Note that server must be running to make connect :)
+*Note that server must be running to make connection :)
