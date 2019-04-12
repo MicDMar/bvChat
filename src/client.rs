@@ -1,7 +1,7 @@
 use std::env;
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Write, prelude::*};
-use std::net::TcpStream;
+use std::net::{TcpStream, Shutdown};
 use std::str;
 use std::thread;
 
@@ -30,7 +30,14 @@ fn handle_incoming_messages(mut stream: TcpStream){
     'outer: loop {
         let mut message = String::new();
         reader.read_line(&mut message).expect("Unable to read from buffer.");
-
+        
+        if(message == ""){
+          println!("Closing connection from server.");
+          let mut socket = reader.into_inner();
+          socket.shutdown(Shutdown::Both);
+          break;
+        }
+        
         // TODO: Check if they don't have colon.
         let mut split: Vec<&str> = message.split(":").collect();
         let mut username = String::from(split[0]);
