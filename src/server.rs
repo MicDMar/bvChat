@@ -48,6 +48,7 @@ enum Message {
     Chat(String,String), // (sender,contents)
     DirectMessage { from: String, to: String, contents: String }, // struct enum
     Exit(String), // (username)
+    Kick(String,String), // (kicker,kickee)
     Login(String, TcpStream), // (username)
     Motd(String), // (username)
     Help(String), //(username)
@@ -266,12 +267,17 @@ fn handle_connection(
                     "/ban" => {
                         let contents = String::from(&contents[1..contents.len()-1]);
                         println!("{:?}", contents);
-                        tx.send(Message::Ban(username.clone(), contents)); 
+                        tx.send(Message::Ban(username.clone(), contents.clone())); 
+                        tx.send(Message::Kick(username.clone(), contents));
                     }
                     "/unban" => {
                         let contents = String::from(&contents[1..contents.len()-1]);
                         println!("{:?}", contents);
                         tx.send(Message::Unban(username.clone(), contents));
+                    }
+                    "/kick" => {
+                        let contents = String::from(&contents[1..contents.len()-1]);
+                        tx.send(Message::Kick(username.clone(), contents));
                     }
                     _ => {}
                 }
