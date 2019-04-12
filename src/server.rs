@@ -139,7 +139,6 @@ fn ban(username: &str) {
 
 /// Build a Message to send a DirectMessage to another user
 fn tell(from: &str, to: &str, contents: &str) -> Message {
-    // FIXME: Parse/Pattern match the contents and determine who to send to
     let from = String::from(from);
     let to = String::from(to);
     let contents = String::from(contents);
@@ -311,10 +310,12 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                 // Send to all sockets in user_list
                 broadcast!(user_list, "{}: {}", username, message);
             }
-            Message::Login(username, socket) => {
-                // TODO: Check if they're already logged in and close the connection. \
-                // Try to do this gracefully, as the socket is used by another thread \
-                // that may not know we're closing the connection 
+            Message::Login(username, mut socket) => {
+                // Check if they're already logged in and close the connection
+                if user_list.contains_key(&username) {
+                    writeln!(socket, "This name is already in use");
+                    socket.shutdown(Shutdown::Both);
+                }
 
                 // Add to hashmap
                 broadcast!(user_list, "{} has connected", username); 
@@ -366,6 +367,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                 match user_list.entry(username.clone()) {
                     Occupied(mut d) => {   
                         d.get_mut().socket.shutdown(Shutdown::Both);
+                        d.remove_entry();
                     },
                     _ => { }
                 }
