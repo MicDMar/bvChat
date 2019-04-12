@@ -300,7 +300,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
     let mut user_list: UserList = HashMap::new();
     let mut user_id = 0;
 
-    let mut saved_messages: HashMap<String,Vec<String>> = HashMap::new();
+    let mut saved_messages: HashMap<String,Vec<Message>> = HashMap::new();
 
     loop {
 
@@ -316,24 +316,48 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                 // Try to do this gracefully, as the socket is used by another thread \
                 // that may not know we're closing the connection 
 
-                // TODO: Check if they've logged in too many times and disallow it
-
-                // TODO: Check and send any saved DMs
-
                 // Add to hashmap
                 broadcast!(user_list, "{} has connected", username); 
-                user_list.insert(username, UserData { socket, user_id });
+                user_list.insert(username.clone(), UserData { socket, user_id });
                 user_id += 1;
+
+                // Send all saved messages to the user
+                match saved_messages.entry(username.clone()) {
+                    Occupied(mut d) => {   
+                        d.get_mut().drain(..).for_each(|message| {
+                            if let Message::DirectMessage { from, to, contents } = message {
+                                match user_list.entry(to.clone()) {
+                                    Occupied(mut d) => {   
+                                        let mut socket = &d.get_mut().socket;
+                                        writeln!(socket, "{} tells you: {}", from, contents);
+                                    }
+                                    _ => { }
+                                }
+                    
+                            }
+                        });
+                    }
+                    _ => { }
+                }
+
             }
             Message::DirectMessage { from, to, contents } => {
-                match user_list.entry(to) {
+                match user_list.entry(to.clone()) {
                     Occupied(mut d) => {   
                         let mut socket = &d.get_mut().socket;
                         writeln!(socket, "{} tells you: {}", from, contents);
                     },
                     Vacant(_) => {
-                        // TODO: There isn't a user by this name logged in
+                        // There isn't a user by this name logged in
                         // Save the message for later 
+                        match saved_messages.entry(to.clone()) {
+                            Occupied(mut d) => {
+                                d.get_mut().push(Message::DirectMessage { from, to, contents});
+                            }
+                            Vacant(mut o) => {
+                                o.insert(vec![Message::DirectMessage { from, to, contents }]);
+                            }
+                        }
                     }
                 }
 
@@ -350,11 +374,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                     Occupied(mut d) => {   
                         d.get_mut().socket.write(text.as_bytes());
                     },
-                    Vacant(_) => {
-                        // TODO: There isn't a user by this name logged in
-                        // Save the message for later 
-
-                    }
+                    _ => { }
                 }
             }
             Message::Help(username) => {
@@ -363,9 +383,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                         let mut socket = &d.get_mut().socket;
                         writeln!(socket, "{}", COMMAND_TEXT);
                     },
-                    Vacant(_) => {
-                        // TODO: There isn't a user by this name logged in
-                        // Save the message for later 
+                    _ => {
                     }
                 }
             }
