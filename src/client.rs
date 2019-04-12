@@ -96,6 +96,10 @@ fn send_messages(mut stream: TcpStream){
             }
             println!("{} has been successfully unblocked!", username);
         }
+        else if input.starts_with("/exit"){
+          println!("Goodbye :)");
+          break;
+        }
         else { 
             stream.write(input.as_bytes()).expect("Failed to write to the server.");
         }
