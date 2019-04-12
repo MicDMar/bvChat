@@ -6,7 +6,7 @@ use std::fs::{File, OpenOptions};
 use std::fmt;
 use std::io;
 use std::io::{BufReader, prelude::*};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -32,13 +32,13 @@ const COMMAND_TEXT: &str = r#"AVAILABLE COMMANDS:
     /ban user - Immediately kicks user from server and dissallows reconnection
     /unban user - Removes ban on specified user"#;
 
-    const SPAM_DELAY: u64 = 20;
+const SPAM_DELAY: u64 = 20;
 
-    type UserList = HashMap<String, UserData>;
-    struct UserData {
-        socket: TcpStream,
-        user_id: i32,
-    }
+type UserList = HashMap<String, UserData>;
+struct UserData {
+    socket: TcpStream,
+    user_id: i32,
+}
 
 #[derive(Debug)]
 enum Message {
@@ -363,6 +363,12 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
 
             }
             Message::Exit(username) => {
+                match user_list.entry(username.clone()) {
+                    Occupied(mut d) => {   
+                        d.get_mut().socket.shutdown(Shutdown::Both);
+                    },
+                    _ => { }
+                }
                 broadcast!(user_list, "{} has exited.", username);
             }
             Message::Motd(username) => {
@@ -490,6 +496,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         if check_login(&username, &password) {
             println!("Successful login attempt");
             tx.send(Message::Login(username.clone(), socket.try_clone().unwrap()));
+            tx.send(Message::Motd(username.clone()));
 
             let thread_tx = mpsc::Sender::clone(&tx); // Clone the transmitter so the thread can have its own
 
