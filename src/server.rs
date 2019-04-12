@@ -4,7 +4,6 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::fmt;
-use std::io;
 use std::io::{BufReader, prelude::*};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::Path;
@@ -131,7 +130,7 @@ fn check_ban(username: &str) -> bool {
         Ok(file) => {
             let buf = BufReader::new(file);
             for line in buf.lines() {
-                let mut line = line.unwrap();
+                let line = line.unwrap();
                 if line == username {
                     return true;
                 }
@@ -251,7 +250,7 @@ fn handle_connection(
                 // Find which command this is
                 let mut index = message.find(" ");
                 // If there isn't a space, get the whole word
-                let mut contents = message.split_off(*index.get_or_insert_with(|| message.len() - 1));
+                let contents = message.split_off(*index.get_or_insert_with(|| message.len() - 1));
                 match message.as_ref() {
                     "/help" => {
                         tx.send(Message::Help(username.clone()));
@@ -375,7 +374,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                             Occupied(mut d) => {
                                 d.get_mut().push(Message::DirectMessage { from, to, contents});
                             }
-                            Vacant(mut o) => {
+                            Vacant(o) => {
                                 o.insert(vec![Message::DirectMessage { from, to, contents }]);
                             }
                         }
@@ -458,7 +457,7 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                 if is_admin(&kicker, &mut user_list) {
                     match user_list.entry(kickee) {
                         Occupied(mut d) => {   
-                            let mut socket = &d.get_mut().socket;
+                            let socket = &d.get_mut().socket;
                             socket.shutdown(Shutdown::Both);
                             d.remove_entry();
                         },
@@ -509,7 +508,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut attempts: HashMap<String, TimeoutCounter> = HashMap::new();
 
     for stream in listener.incoming() {
-        let mut stream = stream?;
+        let stream = stream?;
         let ip = stream.peer_addr()?.ip().to_string();
         println!("Connection received from {}", ip);
         let mut socket = stream.try_clone()?;
@@ -517,7 +516,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Check if this ip has made too many attempts
         match attempts.entry(ip.clone()) {
             Occupied(mut o) => {   
-                let mut counter = o.get_mut();
+                let counter = o.get_mut();
                 if counter.triggered() {
                     writeln!(socket, "Too many connections. Please wait 2 minutes");
                     continue;
@@ -569,7 +568,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let counter = &mut o.get_mut();
                     counter.mark();
                 }
-                Vacant(mut o) => {
+                Vacant(o) => {
                     o.insert(TimeoutCounter::new(3, 120, 30));
                 }
             }
