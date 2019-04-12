@@ -54,6 +54,7 @@ enum Message {
     Help(String), //(username)
     Spam(String), // (username)
     Unban(String,String), // (banner,bannee)
+    Me(String)
 }
 fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
     let file = File::open(filename).expect("No such path file exists.");
@@ -62,29 +63,19 @@ fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
 }
 
 fn check_login(username: &str, password: &str) -> bool {
-    // FIXME: Parse saved logins file to verify this. Create account if nonexistent
     let lines = lines_from_file("userdata.txt");
-    let mut c = 0;
-    let mut users = Vec::new();
-    let mut pw = Vec::new();
+    let mut user_hash = HashMap::new();
     let mut f = OpenOptions::new().write(true).append(true).open("userdata.txt").unwrap();
-    for line in lines {
-        if c % 2 == 0 {
-            users.push(line);
-        }
-        else {
-            pw.push(line);
-        }
-        c += 1;
+    
+    let mut i = 0;
+    while i < lines.len() {
+        user_hash.insert(lines[i].to_string(), lines[i+1].to_string());
+        i += 2;
     }
-
-    if users.contains(&username.to_string()) { 
-        if pw.contains(&password.to_string()) {
-            true
-        }
-        else {
-            false
-        }
+    
+    if user_hash.contains_key(&username.to_owned()) {
+        if user_hash.get(&username.to_owned()).expect("Could not find hash") == password { true }
+        else { false }
     }
     else {
         if let Err(e) = writeln!(f, "{}", username) {
@@ -279,6 +270,9 @@ fn handle_connection(
                         let contents = String::from(&contents[1..contents.len()-1]);
                         tx.send(Message::Kick(username.clone(), contents));
                     }
+                    "/me" => {
+                      tx.send(Message::Me(username.clone()));
+                    }
                     _ => {}
                 }
             } else {
@@ -312,9 +306,12 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
         match rx.recv().unwrap() {
             Message::Chat(username, message) => {
                 //println!("{}: {}", username, message);
-                let body = format!("{}: {}", username, message);
+                //let body = format!("{}: {}", username, message);
                 // Send to all sockets in user_list
                 broadcast!(user_list, "{}: {}", username, message);
+            }
+            Message::Me(username) => {
+                broadcast!(user_list, "{} says hi", username);
             }
             Message::Login(username, mut socket) => {
                 // Check if they're already logged in and close the connection
@@ -322,7 +319,6 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                     writeln!(socket, "This name is already in use");
                     socket.shutdown(Shutdown::Both);
                 }
-
                 // Add to hashmap
                 broadcast!(user_list, "{} has connected", username); 
                 user_list.insert(username.clone(), UserData { socket, user_id });
