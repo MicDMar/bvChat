@@ -54,7 +54,8 @@ enum Message {
     Help(String), //(username)
     Spam(String), // (username)
     Unban(String,String), // (banner,bannee)
-    Me(String)
+    Me(String),
+    Who(String)
 }
 fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
     let file = File::open(filename).expect("No such path file exists.");
@@ -271,7 +272,10 @@ fn handle_connection(
                         tx.send(Message::Kick(username.clone(), contents));
                     }
                     "/me" => {
-                      tx.send(Message::Me(username.clone()));
+                        tx.send(Message::Me(username.clone()));
+                    }
+                    "/who" => {
+                        tx.send(Message::Who(username.clone()));
                     }
                     _ => {}
                 }
@@ -419,6 +423,22 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                     broadcast!(user_list, "{} has been unbanned.", bannee);
                 }
                 
+            }
+            Message::Who(username) => {
+                let mut user_vec = Vec::new();
+                for (user, _) in &user_list {
+                    user_vec.push(user.clone())
+                }
+                //let mut user_vec: Vec<String> = user_list.iter().map(|(user, _)| user).collect::<Vec<String>>();
+                match user_list.entry(username) {
+                    Occupied(mut d) => {
+                        let mut socket = &d.get_mut().socket;
+                        for user in user_vec {
+                            writeln!(socket, "{}", user);
+                        }
+                    }
+                    Vacant(_) => {}
+                }
             }
             _ => { }
         }
