@@ -57,16 +57,24 @@ enum Message {
     Me(String),
     Who(String)
 }
+
 fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
-    let file = File::open(filename).expect("No such path file exists.");
-    let buffer = BufReader::new(file);
-    buffer.lines().map( |l| l.expect("Error parsing.")).collect()
+    // let file = File::open(filename).expect("No such path file exists.");
+    match OpenOptions::new().read(true).open("userdata.txt") {
+        Ok(file) => {
+            let buffer = BufReader::new(file);
+            buffer.lines().map( |l| l.expect("Error parsing.")).collect()
+        }
+        _ => {
+            vec![]
+        }
+    }
 }
 
 fn check_login(username: &str, password: &str) -> bool {
     let lines = lines_from_file("userdata.txt");
     let mut user_hash = HashMap::new();
-    let mut f = OpenOptions::new().write(true).append(true).open("userdata.txt").unwrap();
+    let mut f = OpenOptions::new().write(true).create(true).append(true).open("userdata.txt").unwrap();
     
     let mut i = 0;
     while i < lines.len() {
@@ -90,9 +98,22 @@ fn check_login(username: &str, password: &str) -> bool {
 }
 
 /// Check if a user is the admin of the server
-fn is_admin(username: &str, user_list: &UserList) -> bool {
+fn is_admin(username: &str, user_list: &mut UserList) -> bool {
     match get_admin(user_list) {
-        Some(user) => user == username,
+        Some(user) => {
+            if user == username {
+                true
+            } else {
+                match user_list.entry(String::from(username)) {
+                    Occupied(mut d) => {   
+                        let mut socket = &d.get_mut().socket;
+                        writeln!(socket, "You are not the admin");
+                    },
+                    _ => { }
+                }
+                false
+            }
+        }
         None => false
     }
 }
@@ -106,12 +127,11 @@ fn get_admin(user_list: &UserList) -> Option<String> {
 }
 
 fn check_ban(username: &str) -> bool {
-    match OpenOptions::new().open("banlist") {
+    match OpenOptions::new().read(true).open(BAN_FILE) {
         Ok(file) => {
             let buf = BufReader::new(file);
             for line in buf.lines() {
                 let mut line = line.unwrap();
-                line.pop();
                 if line == username {
                     return true;
                 }
@@ -170,7 +190,6 @@ impl TimeoutCounter {
 
     fn triggered(&mut self) -> bool {
         // Check if we've previously triggered this
-        println!("{:?}", self.attempts);
         match self.clear_time {
             Some(instant) => {
                 if instant.elapsed() > Duration::new(self.penalty_delay, 0) {
@@ -247,7 +266,6 @@ fn handle_connection(
                                 tx.send(tell("Server", &username, "Invalid /tell format"));
                             }
                         }
-                        println!("{:?}", contents);
                     },
                     "/motd" => {
                         tx.send(Message::Motd(username.clone()));
@@ -258,13 +276,11 @@ fn handle_connection(
                     }
                     "/ban" => {
                         let contents = String::from(&contents[1..contents.len()-1]);
-                        println!("{:?}", contents);
                         tx.send(Message::Ban(username.clone(), contents.clone())); 
                         tx.send(Message::Kick(username.clone(), contents));
                     }
                     "/unban" => {
                         let contents = String::from(&contents[1..contents.len()-1]);
-                        println!("{:?}", contents);
                         tx.send(Message::Unban(username.clone(), contents));
                     }
                     "/kick" => {
@@ -306,10 +322,8 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
     let mut saved_messages: HashMap<String,Vec<Message>> = HashMap::new();
 
     loop {
-
         match rx.recv().unwrap() {
             Message::Chat(username, message) => {
-                //println!("{}: {}", username, message);
                 //let body = format!("{}: {}", username, message);
                 // Send to all sockets in user_list
                 broadcast!(user_list, "{}: {}", username, message);
@@ -412,14 +426,14 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
 
             }
             Message::Ban(banner, bannee) => {
-                if is_admin(&banner, &user_list) {
+                if is_admin(&banner, &mut user_list) {
                     ban(&bannee);
                     broadcast!(user_list, "{} has been banned.", bannee);
                 }
             }
             Message::Unban(banner, bannee) => {
-                if is_admin(&banner, &user_list) {
-                    unban(&banner);
+                if is_admin(&banner, &mut user_list) {
+                    unban(&bannee);
                     broadcast!(user_list, "{} has been unbanned.", bannee);
                 }
                 
@@ -439,6 +453,19 @@ fn handle_server(rx: mpsc::Receiver<Message>) {
                     }
                     Vacant(_) => {}
                 }
+            }
+            Message::Kick(kicker, kickee) => {
+                if is_admin(&kicker, &mut user_list) {
+                    match user_list.entry(kickee) {
+                        Occupied(mut d) => {   
+                            let mut socket = &d.get_mut().socket;
+                            socket.shutdown(Shutdown::Both);
+                            d.remove_entry();
+                        },
+                        _ => { }
+                    }
+                }
+
             }
             _ => { }
         }
@@ -534,6 +561,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 println!("User disconnected from server.");
             });
         } else {
+            writeln!(socket, "Failed authentication");
+            socket.shutdown(Shutdown::Both);
             println!("Failed login attempt");
             match attempts.entry(ip) {
                 Occupied(mut o) => {
@@ -541,7 +570,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     counter.mark();
                 }
                 Vacant(mut o) => {
-                    o.insert(TimeoutCounter::new(5, 120, 30));
+                    o.insert(TimeoutCounter::new(3, 120, 30));
                 }
             }
 
